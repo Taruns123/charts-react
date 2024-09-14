@@ -1,0 +1,30 @@
+{
+  "name": "@taruns123/charts-react",
+  "version": "0.0.1",
+  "description": "A comprehensive react library for all type of charts to visualize your data.",
+  "scripts": {
+    "rollup": "rollup -c"
+  },
+  "author": "Tarun",
+  "license": "ISC",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^21.0.1",
+    "@rollup/plugin-node-resolve": "^13.0.6",
+    "@rollup/plugin-typescript": "^8.3.0",
+    "@types/react": "^17.0.34",
+    "react": "^17.0.2",
+    "rollup": "^2.60.0",
+    "rollup-plugin-dts": "^4.0.1",
+    "tslib": "^2.7.0",
+    "typescript": "^4.4.4"
+  },
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/taruns123"
+  },
+  "types": "dist/index.d.ts"
+}
