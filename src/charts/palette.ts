@@ -38,6 +38,10 @@ export interface ThemeTokens {
   tooltipText: string;
   crosshair: string;
   hoverBand: string;
+  /** Unfilled track behind gauges and radial bars. */
+  track: string;
+  /** Reference lines and annotations. */
+  reference: string;
 }
 
 export const themes: Record<ChartTheme, ThemeTokens> = {
@@ -52,6 +56,8 @@ export const themes: Record<ChartTheme, ThemeTokens> = {
     tooltipText: "#1d1d1b",
     crosshair: "#a9a8a2",
     hoverBand: "rgba(20,20,10,0.04)",
+    track: "#efeee9",
+    reference: "#6b6a65",
   },
   dark: {
     text: "#f3f2ee",
@@ -64,5 +70,7 @@ export const themes: Record<ChartTheme, ThemeTokens> = {
     tooltipText: "#f3f2ee",
     crosshair: "#6f6e68",
     hoverBand: "rgba(255,255,255,0.05)",
+    track: "#2a2a27",
+    reference: "#a3a29b",
   },
 };

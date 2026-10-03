@@ -1,45 +1,26 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { darkPalette, lightPalette, themes } from "./palette";
-import { linearScale, niceTicks, formatCompact, formatFull } from "./scale";
+import React, { useMemo, useState } from "react";
+import { linearScale, niceTicks, alignedTicks, formatCompact, formatFull } from "./scale";
 import { areaPath, curvePath, roundedBar, Point } from "./curve";
+import { num, stackSeries, lastNonZero } from "./stack";
 import { useContainerWidth } from "./useSize";
-import { injectStyles } from "./styles";
-import type { AreaChartProps, BarChartProps, Datum, LineChartProps, SeriesConfig } from "./types";
+import { getTheme, navKey, resolveSeries, ResolvedSeries, SrTable, textWidth, Tooltip, useChartId, useHiddenSeries } from "./shared";
+import { collectReferenceLines } from "./ReferenceLine";
+import Legend from "./Legend";
+import type { AreaChartProps, BarChartProps, ComboChartProps, LineChartProps } from "./types";
 
-type Kind = "line" | "area" | "bar";
+type Kind = "line" | "area" | "bar" | "combo";
 
-export type CartesianProps = LineChartProps & AreaChartProps & BarChartProps & { kind: Kind };
+export type CartesianProps = Omit<LineChartProps & AreaChartProps & BarChartProps, "series"> &
+  Partial<Pick<ComboChartProps, "yDomainRight" | "formatYRight">> & { kind: Kind; series?: ComboChartProps["series"] };
 
-interface ResolvedSeries {
-  key: string;
-  label: string;
-  color: string;
+interface Axis {
+  ticks: number[];
+  domain: [number, number];
+  scale: (v: number) => number;
+  labels: string[];
 }
 
-let uid = 0;
-
-function resolveSeries(data: Datum[], xKey: string, series: Array<string | SeriesConfig> | undefined, palette: string[]): ResolvedSeries[] {
-  let list: SeriesConfig[];
-  if (series && series.length) {
-    list = series.map((s) => (typeof s === "string" ? { key: s } : s));
-  } else {
-    const first = data[0] || {};
-    list = Object.keys(first)
-      .filter((k) => k !== xKey && typeof first[k] === "number")
-      .map((k) => ({ key: k }));
-  }
-  return list.map((s, i) => ({
-    key: s.key,
-    label: s.label || s.key,
-    color: s.color || palette[i % palette.length],
-  }));
-}
-
-function num(v: any): number {
-  const n = typeof v === "number" ? v : parseFloat(v);
-  return isFinite(n) ? n : 0;
-}
-
+/** Engine behind LineChart, AreaChart, BarChart and ComboChart. */
 export default function CartesianChart(props: CartesianProps) {
   const {
     kind,
@@ -55,194 +36,240 @@ export default function CartesianChart(props: CartesianProps) {
     yTickCount = 5,
     smooth = false,
     strokeWidth = 2,
-    showDots = false,
-    showEndDot = true,
     zeroBaseline = true,
     gradient = true,
     stacked = false,
     radius = 4,
     maxBarWidth = 28,
+    legendToggle = true,
     title,
     description,
     className,
     style,
     onHover,
   } = props;
+  const showDots = props.showDots !== undefined ? props.showDots : kind === "combo";
+  const showEndDot = props.showEndDot !== undefined ? props.showEndDot : kind === "line";
 
-  const tokens = themes[theme] || themes.light;
-  const palette = props.colors && props.colors.length ? props.colors : theme === "dark" ? darkPalette : lightPalette;
-  const series = useMemo(() => resolveSeries(data, xKey, props.series, palette), [data, xKey, props.series, palette]);
+  const { tokens, palette } = getTheme(theme, props.colors);
+  const defaultMark = kind === "combo" ? "bar" : kind;
+  const paletteSig = palette.join();
+  const series = useMemo(
+    () => resolveSeries(data, xKey, props.series, palette, defaultMark),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, xKey, props.series, paletteSig, defaultMark]
+  );
+  const [hidden, toggle] = useHiddenSeries(
+    series.map((s) => s.key),
+    props.defaultHiddenSeries,
+    props.hiddenSeries,
+    props.onLegendToggle
+  );
+  const [highlight, setHighlight] = useState<string | null>(null);
+  const visible = series.filter((s) => hidden.indexOf(s.key) < 0);
   const showLegend = props.showLegend !== undefined ? props.showLegend : series.length > 1;
   const formatX = props.formatX || ((v: any) => String(v));
   const formatY = props.formatY || formatCompact;
+  const formatYRight = props.formatYRight || formatY;
   const formatValue = props.formatValue || ((v: number) => formatFull(v));
+  const refLines = collectReferenceLines(props.referenceLines, props.children);
+  const annotations = props.annotations || [];
 
   const { ref, width } = useContainerWidth(fixedWidth);
   const [active, setActive] = useState<number | null>(null);
   const [pointerY, setPointerY] = useState(0);
-  const idRef = useRef<string>("");
-  if (!idRef.current) idRef.current = "tc" + ++uid;
-  const id = idRef.current;
+  const id = useChartId();
 
-  useEffect(() => {
-    injectStyles();
-  }, []);
-
-  const isStacked = stacked && kind !== "line";
   const n = data.length;
+  const banded = kind === "bar" || (kind === "combo" && series.some((s) => s.mark === "bar"));
+  const hasRight = series.some((s) => s.axis === 1);
 
-  // ----- y domain -----
-  const stacks = useMemo(() => {
-    // per index cumulative values (only used when stacked)
-    return data.map((d) => {
-      let pos = 0;
-      let neg = 0;
-      return series.map((s) => {
-        const v = num(d[s.key]);
-        if (v >= 0) {
-          const r: [number, number] = [pos, pos + v];
-          pos += v;
-          return r;
-        }
-        const r: [number, number] = [neg, neg + v];
-        neg += v;
-        return r;
+  // ----- stacking: per (mark, axis) group of visible series; lines never stack -----
+  const visibleSig = visible.map((s) => s.key + s.mark + s.axis).join();
+  const stackOf = useMemo(() => {
+    const out: Record<string, Array<[number, number]>> = {};
+    if (!stacked) return out;
+    const groups: Record<string, ResolvedSeries[]> = {};
+    visible.forEach((s) => {
+      if (s.mark === "line") return;
+      const g = s.mark + s.axis;
+      (groups[g] = groups[g] || []).push(s);
+    });
+    Object.keys(groups).forEach((g) => {
+      const keys = groups[g].map((s) => s.key);
+      const st = stackSeries(data, keys);
+      keys.forEach((k, j) => {
+        out[k] = st.map((row) => row[j]);
       });
     });
-  }, [data, series]);
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, stacked, visibleSig]);
+  const isStacked = (s: ResolvedSeries) => !!stackOf[s.key];
+  const topOf = (s: ResolvedSeries, i: number) => (isStacked(s) ? stackOf[s.key][i][1] : num(data[i][s.key]));
 
-  let lo = Infinity;
-  let hi = -Infinity;
-  data.forEach((d, i) => {
-    series.forEach((s, j) => {
-      if (isStacked) {
-        lo = Math.min(lo, stacks[i][j][0], stacks[i][j][1]);
-        hi = Math.max(hi, stacks[i][j][0], stacks[i][j][1]);
-      } else {
-        const v = num(d[s.key]);
-        lo = Math.min(lo, v);
-        hi = Math.max(hi, v);
-      }
+  // ----- y domains (one per axis) -----
+  const extent = (axis: 0 | 1): [number, number] => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    const take = (v: number) => {
+      lo = Math.min(lo, v);
+      hi = Math.max(hi, v);
+    };
+    visible.forEach((s) => {
+      if (s.axis !== axis) return;
+      data.forEach((d, i) => {
+        if (isStacked(s)) {
+          take(stackOf[s.key][i][0]);
+          take(stackOf[s.key][i][1]);
+        } else take(num(d[s.key]));
+      });
     });
-  });
-  if (!isFinite(lo)) {
-    lo = 0;
-    hi = 1;
+    refLines.forEach((r) => {
+      if (r.y !== undefined && (r.axis === "right" ? 1 : 0) === axis) take(r.y);
+    });
+    annotations.forEach((a) => {
+      if (a.y !== undefined && axis === 0) take(a.y);
+    });
+    if (!isFinite(lo)) return [0, 1];
+    const filled = series.some((s) => s.axis === axis && s.mark !== "line");
+    if (filled || zeroBaseline) {
+      lo = Math.min(0, lo);
+      hi = Math.max(0, hi);
+    }
+    return [lo, hi];
+  };
+
+  const [lo0, hi0] = extent(0);
+  const leftNice = props.yDomain
+    ? {
+        domain: props.yDomain,
+        ticks: niceTicks(props.yDomain[0], props.yDomain[1], yTickCount).ticks.filter((t) => t >= props.yDomain![0] && t <= props.yDomain![1]),
+      }
+    : niceTicks(lo0, hi0, yTickCount);
+  let rightNice: { domain: [number, number]; ticks: number[] } | null = null;
+  if (hasRight) {
+    if (props.yDomainRight) {
+      const d = props.yDomainRight;
+      rightNice = { domain: d, ticks: niceTicks(d[0], d[1], yTickCount).ticks.filter((t) => t >= d[0] && t <= d[1]) };
+    } else {
+      const [lo1, hi1] = extent(1);
+      // same number of intervals as the left axis, so both share one grid
+      rightNice = alignedTicks(lo1, hi1, Math.max(1, leftNice.ticks.length - 1));
+    }
   }
-  if (kind !== "line" || zeroBaseline) {
-    lo = Math.min(0, lo);
-    hi = Math.max(0, hi);
-  }
-  const nice = props.yDomain ? { domain: props.yDomain, ticks: niceTicks(props.yDomain[0], props.yDomain[1], yTickCount).ticks.filter((t) => t >= props.yDomain![0] && t <= props.yDomain![1]) } : niceTicks(lo, hi, yTickCount);
-  const yLabels = nice.ticks.map((t) => formatY(t));
-  const longest = yLabels.reduce((m, l) => Math.max(m, l.length), 0);
+
+  const leftLabels = leftNice.ticks.map((t) => formatY(t));
+  const rightLabels = rightNice ? rightNice.ticks.map((t) => formatYRight(t)) : [];
+  const widest = (ls: string[]) => ls.reduce((m, l) => Math.max(m, l.length), 0);
 
   // ----- layout -----
-  const margin = { top: 10, right: kind === "bar" ? 4 : 12, bottom: 30, left: Math.round(longest * 6.6 + 14) };
+  const margin = {
+    top: 10,
+    right: hasRight ? Math.round(widest(rightLabels) * 6.6 + 14) : banded ? 4 : 12,
+    bottom: 30,
+    left: Math.round(widest(leftLabels) * 6.6 + 14),
+  };
   const innerW = Math.max(0, width - margin.left - margin.right);
   const innerH = Math.max(0, height - margin.top - margin.bottom);
-  const y = linearScale(nice.domain, [innerH, 0]);
+  const axes: Axis[] = [{ domain: leftNice.domain, ticks: leftNice.ticks, scale: linearScale(leftNice.domain, [innerH, 0]), labels: leftLabels }];
+  if (rightNice) axes.push({ domain: rightNice.domain, ticks: rightNice.ticks, scale: linearScale(rightNice.domain, [innerH, 0]), labels: rightLabels });
+  const yOf = (s: { axis: 0 | 1 }) => (axes[s.axis] || axes[0]).scale;
+  const y = axes[0].scale;
   const band = n ? innerW / n : innerW;
-  const xAt = (i: number) => (kind === "bar" ? band * (i + 0.5) : n > 1 ? (innerW * i) / (n - 1) : innerW / 2);
+  const xAt = (i: number) => (banded ? band * (i + 0.5) : n > 1 ? (innerW * i) / (n - 1) : innerW / 2);
+  const baseYFor = (axis: 0 | 1) => {
+    const a = axes[axis] || axes[0];
+    return a.scale(Math.max(a.domain[0], Math.min(a.domain[1], 0)));
+  };
+  const baseY = baseYFor(0);
 
   // x tick thinning: keep labels roughly >= 72px apart
   const labelEvery = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(innerW / 72))));
 
+  const indexOfX = (x: string | number): number => {
+    for (let i = 0; i < n; i++) if (data[i][xKey] === x) return i;
+    return typeof x === "number" && x >= 0 && x < n ? Math.round(x) : -1;
+  };
+
   // ----- hover -----
+  const setIndex = (idx: number | null) => {
+    if (idx !== active) {
+      setActive(idx);
+      if (onHover) onHover(idx, idx === null ? null : data[idx]);
+    }
+  };
   const handleMove = (e: React.PointerEvent<SVGRectElement>) => {
     if (!n) return;
     const rect = (e.currentTarget as SVGRectElement).getBoundingClientRect();
     const px = e.clientX - rect.left;
-    let idx: number;
-    if (kind === "bar") idx = Math.floor(px / band);
-    else idx = n > 1 ? Math.round((px / innerW) * (n - 1)) : 0;
+    let idx = banded ? Math.floor(px / band) : n > 1 ? Math.round((px / innerW) * (n - 1)) : 0;
     idx = Math.max(0, Math.min(n - 1, idx));
     setPointerY(e.clientY - rect.top);
-    if (idx !== active) {
-      setActive(idx);
-      if (onHover) onHover(idx, data[idx]);
-    }
+    setIndex(idx);
   };
-  const clear = () => {
-    setActive(null);
-    if (onHover) onHover(null, null);
-  };
+  const clear = () => setIndex(null);
   const handleKey = (e: React.KeyboardEvent) => {
-    if (!n) return;
-    let next: number | null = active;
-    if (e.key === "ArrowRight") next = active === null ? 0 : Math.min(n - 1, active + 1);
-    else if (e.key === "ArrowLeft") next = active === null ? n - 1 : Math.max(0, active - 1);
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = n - 1;
-    else if (e.key === "Escape") next = null;
-    else return;
+    if (e.target !== e.currentTarget) return; // legend buttons handle their own keys
+    const next = navKey(e.key, active, n);
+    if (next === undefined) return;
     e.preventDefault();
     setPointerY(innerH * 0.3);
-    setActive(next);
-    if (onHover) onHover(next, next === null ? null : data[next]);
+    setIndex(next);
   };
 
   // ----- marks -----
-  const marks: React.ReactNode[] = [];
+  const fade = (s: ResolvedSeries) => (highlight && highlight !== s.key ? 0.22 : 1);
   const defs: React.ReactNode[] = [];
-  const baseY = y(Math.max(nice.domain[0], Math.min(nice.domain[1], 0)));
+  const areaMarks: React.ReactNode[] = [];
+  const barMarks: React.ReactNode[] = [];
+  const lineMarks: React.ReactNode[] = [];
 
-  if (kind === "line" || kind === "area") {
-    const pointsFor = (j: number, which: 0 | 1): Point[] =>
-      data.map((d, i) => [xAt(i), y(isStacked ? stacks[i][j][which] : which === 0 ? 0 : num(d[series[j].key]))]);
-    // overlapping (unstacked) areas get a lighter wash so lower series stay visible
-    const overlapping = !isStacked && series.length > 1;
-    const fillTop = props.fillOpacity !== undefined ? props.fillOpacity : gradient ? (overlapping ? 0.16 : 0.28) : overlapping ? 0.08 : 0.12;
+  const pointsFor = (s: ResolvedSeries, which: 0 | 1): Point[] => {
+    const ys = yOf(s);
+    return data.map((d, i) => [xAt(i), ys(isStacked(s) ? stackOf[s.key][i][which] : which === 0 ? 0 : num(d[s.key]))]);
+  };
 
-    // draw areas first (back to front), then lines on top
-    if (kind === "area") {
-      series.forEach((s, j) => {
-        const top = pointsFor(j, 1);
-        const bottom = isStacked ? pointsFor(j, 0) : data.map((_, i) => [xAt(i), baseY] as Point);
-        const gid = `${id}-g${j}`;
-        if (gradient) {
-          defs.push(
-            <linearGradient key={gid} id={gid} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={s.color} stopOpacity={fillTop} />
-              <stop offset="100%" stopColor={s.color} stopOpacity={isStacked ? fillTop * 0.45 : 0.02} />
-            </linearGradient>
-          );
-        }
-        marks.push(
-          <path
-            key={`a-${s.key}`}
-            d={areaPath(top, bottom, smooth)}
-            fill={gradient ? `url(#${gid})` : s.color}
-            fillOpacity={gradient ? 1 : fillTop}
-          />
-        );
-      });
-    }
-    series.forEach((s, j) => {
-      const pts = pointsFor(j, 1);
-      marks.push(
-        <path
-          key={`l-${s.key}`}
-          d={curvePath(pts, smooth)}
-          fill="none"
-          stroke={s.color}
-          strokeWidth={strokeWidth}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
+  const areas = visible.filter((s) => s.mark === "area");
+  // overlapping (unstacked) areas get a lighter wash so lower series stay visible
+  const overlapping = areas.length > 1 && !areas.every(isStacked);
+  const fillTop = props.fillOpacity !== undefined ? props.fillOpacity : gradient ? (overlapping ? 0.16 : 0.28) : overlapping ? 0.08 : 0.12;
+  areas.forEach((s) => {
+    const top = pointsFor(s, 1);
+    const b = baseYFor(s.axis);
+    const bottom = isStacked(s) ? pointsFor(s, 0) : data.map((_, i) => [xAt(i), b] as Point);
+    const gid = `${id}-g-${s.key.replace(/[^\w-]/g, "_")}`;
+    if (gradient) {
+      defs.push(
+        <linearGradient key={gid} id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={s.color} stopOpacity={fillTop} />
+          <stop offset="100%" stopColor={s.color} stopOpacity={isStacked(s) ? fillTop * 0.45 : 0.02} />
+        </linearGradient>
       );
-      if (showDots) {
-        pts.forEach((p, i) =>
-          marks.push(<circle key={`d-${s.key}-${i}`} cx={p[0]} cy={p[1]} r={3.5} fill={s.color} stroke={tokens.surface} strokeWidth={2} />)
-        );
-      } else if (showEndDot && kind === "line" && pts.length) {
-        const p = pts[pts.length - 1];
-        marks.push(<circle key={`e-${s.key}`} cx={p[0]} cy={p[1]} r={4} fill={s.color} stroke={tokens.surface} strokeWidth={2} />);
-      }
+    }
+    areaMarks.push(
+      <path
+        key={`a-${s.key}`}
+        d={areaPath(top, bottom, smooth)}
+        fill={gradient ? `url(#${gid})` : s.color}
+        fillOpacity={gradient ? 1 : fillTop}
+        opacity={fade(s)}
+        style={{ transition: "opacity 160ms" }}
+      />
+    );
+  });
+
+  // bars: one slot per unstacked series, or one per stacked axis group
+  const bars = visible.filter((s) => s.mark === "bar");
+  if (bars.length) {
+    const slotKeys: string[] = [];
+    const slotOf: Record<string, number> = {};
+    bars.forEach((s) => {
+      const k = isStacked(s) ? "stack" + s.axis : s.key;
+      if (slotKeys.indexOf(k) < 0) slotKeys.push(k);
+      slotOf[s.key] = slotKeys.indexOf(k);
     });
-  } else {
-    // bars
-    const groups = isStacked ? 1 : series.length;
+    const groups = slotKeys.length;
     const gap = 2;
     const slot = band * 0.72;
     const barW = Math.max(2, Math.min(maxBarWidth, (slot - gap * (groups - 1)) / groups));
@@ -250,35 +277,34 @@ export default function CartesianChart(props: CartesianProps) {
     data.forEach((d, i) => {
       const left = xAt(i) - groupW / 2;
       const dim = active !== null && active !== i;
-      series.forEach((s, j) => {
-        let v0: number;
-        let v1: number;
-        if (isStacked) {
-          v0 = stacks[i][j][0];
-          v1 = stacks[i][j][1];
-        } else {
-          v0 = 0;
-          v1 = num(d[s.key]);
-        }
+      bars.forEach((s) => {
+        const ys = yOf(s);
+        const st = isStacked(s);
+        const v0 = st ? stackOf[s.key][i][0] : 0;
+        const v1 = st ? stackOf[s.key][i][1] : num(d[s.key]);
         if (v1 === v0) return;
         const up = v1 >= v0;
-        const yA = y(Math.max(v0, v1));
-        const yB = y(Math.min(v0, v1));
+        const yA = ys(Math.max(v0, v1));
+        const yB = ys(Math.min(v0, v1));
         // 2px surface gap between stacked segments (not at the baseline)
-        const segGap = isStacked && v0 !== 0 ? gap : 0;
+        const segGap = st && v0 !== 0 ? gap : 0;
         const top = up ? yA : yA + segGap;
         const h = Math.max(0, yB - yA - segGap);
-        const isEnd = !isStacked || j === lastNonZero(stacks[i], up);
-        const bx = isStacked ? left : left + j * (barW + gap);
+        let isEnd = true;
+        if (st) {
+          const peers = bars.filter((p) => isStacked(p) && p.axis === s.axis);
+          isEnd = peers[lastNonZero(peers.map((p) => stackOf[p.key][i]), up)] === s;
+        }
+        const bx = left + slotOf[s.key] * (barW + gap);
         const dPath = roundedBar(bx, top, barW, h, isEnd ? radius : 0, up);
         if (!dPath) return;
-        marks.push(
+        barMarks.push(
           <path
             key={`b-${i}-${s.key}`}
             className={"tc-bar" + (up ? "" : " tc-neg")}
             d={dPath}
             fill={s.color}
-            opacity={dim ? 0.45 : 1}
+            opacity={(dim ? 0.45 : 1) * fade(s)}
             style={{ animationDelay: animate ? `${Math.min(i * 28, 420)}ms` : undefined, transition: "opacity 140ms" }}
           />
         );
@@ -286,59 +312,156 @@ export default function CartesianChart(props: CartesianProps) {
     });
   }
 
+  // lines (and area outlines), drawn after bars so they sit on top
+  visible.forEach((s) => {
+    if (s.mark === "bar") return;
+    const pts = pointsFor(s, 1);
+    lineMarks.push(
+      <path
+        key={`l-${s.key}`}
+        d={curvePath(pts, smooth)}
+        fill="none"
+        stroke={s.color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        opacity={fade(s)}
+        style={{ transition: "opacity 160ms" }}
+      />
+    );
+    if (showDots && s.mark === "line") {
+      pts.forEach((p, i) =>
+        lineMarks.push(
+          <circle key={`d-${s.key}-${i}`} cx={p[0]} cy={p[1]} r={3.5} fill={s.color} stroke={tokens.surface} strokeWidth={2} opacity={fade(s)} />
+        )
+      );
+    } else if (showEndDot && s.mark === "line" && pts.length) {
+      const p = pts[pts.length - 1];
+      lineMarks.push(<circle key={`e-${s.key}`} cx={p[0]} cy={p[1]} r={4} fill={s.color} stroke={tokens.surface} strokeWidth={2} opacity={fade(s)} />);
+    }
+  });
+
+  // ----- reference lines & annotations -----
+  const refMarks: React.ReactNode[] = [];
+  refLines.forEach((r, k) => {
+    const color = r.color || tokens.reference;
+    const dash = r.dashed === false ? undefined : "4 4";
+    const sw = r.strokeWidth || 1;
+    if (r.y !== undefined) {
+      const axis: 0 | 1 = r.axis === "right" && axes[1] ? 1 : 0;
+      const yy = axes[axis].scale(r.y);
+      if (yy < -0.5 || yy > innerH + 0.5) return;
+      const atStart = r.labelPosition === "start";
+      refMarks.push(
+        <g key={`ry-${k}`} className="tc-ref">
+          <line x1={0} x2={innerW} y1={yy} y2={yy} stroke={color} strokeWidth={sw} strokeDasharray={dash} shapeRendering="crispEdges" />
+          {r.label && (
+            <text className="tc-ref-label" x={atStart ? 4 : innerW - 4} y={yy - 6} textAnchor={atStart ? "start" : "end"} fill={color} stroke={tokens.surface}>
+              {r.label}
+            </text>
+          )}
+        </g>
+      );
+    } else if (r.x !== undefined) {
+      const idx = indexOfX(r.x);
+      if (idx < 0) return;
+      const xx = xAt(idx);
+      const right = xx + textWidth(r.label || "") + 8 > innerW;
+      refMarks.push(
+        <g key={`rx-${k}`} className="tc-ref">
+          <line x1={xx} x2={xx} y1={0} y2={innerH} stroke={color} strokeWidth={sw} strokeDasharray={dash} shapeRendering="crispEdges" />
+          {r.label && (
+            <text className="tc-ref-label" x={right ? xx - 6 : xx + 6} y={10} textAnchor={right ? "end" : "start"} fill={color} stroke={tokens.surface}>
+              {r.label}
+            </text>
+          )}
+        </g>
+      );
+    }
+  });
+
+  const noteMarks: React.ReactNode[] = [];
+  annotations.forEach((a, k) => {
+    const idx = indexOfX(a.x);
+    if (idx < 0) return;
+    let s: ResolvedSeries | undefined;
+    for (let j = 0; j < visible.length; j++) if (visible[j].key === a.seriesKey) s = visible[j];
+    if (!s && a.seriesKey) return; // annotated series is hidden
+    if (!s && a.y === undefined) s = visible[0];
+    if (!s && a.y === undefined) return;
+    const ys = s ? yOf(s) : y;
+    const v = a.y !== undefined ? a.y : topOf(s!, idx);
+    const cx = xAt(idx);
+    const cy = ys(v);
+    const color = a.color || (s ? s.color : tokens.text);
+    const w = textWidth(a.label) + 14;
+    const below = cy < 34;
+    const ly = below ? cy + 14 : cy - 34;
+    const lx = Math.max(0, Math.min(innerW - w, cx - w / 2));
+    noteMarks.push(
+      <g key={`n-${k}`} className="tc-fade">
+        <line x1={cx} x2={cx} y1={below ? cy + 5 : cy - 5} y2={below ? ly : ly + 20} stroke={color} strokeWidth={1} />
+        <circle cx={cx} cy={cy} r={4.5} fill={tokens.surface} stroke={color} strokeWidth={2} />
+        <rect x={lx} y={ly} width={w} height={20} rx={6} fill={tokens.surface} stroke={color} strokeOpacity={0.55} />
+        <text x={lx + w / 2} y={ly + 13.5} textAnchor="middle" className="tc-note-label" fill={tokens.text}>
+          {a.label}
+        </text>
+      </g>
+    );
+  });
+
   // ----- tooltip & crosshair -----
   let tooltip: React.ReactNode = null;
-  const overlay: React.ReactNode[] = [];
+  const under: React.ReactNode[] = [];
+  const over: React.ReactNode[] = [];
   if (active !== null && n) {
     const cx = xAt(active);
-    if (kind === "bar") {
-      overlay.push(<rect key="band" x={band * active} y={0} width={band} height={innerH} fill={tokens.hoverBand} rx={4} />);
-    } else {
-      if (showCrosshair) {
-        overlay.push(<line key="xh" x1={cx} x2={cx} y1={0} y2={innerH} stroke={tokens.crosshair} strokeWidth={1} />);
-      }
-      series.forEach((s, j) => {
-        const v = isStacked ? stacks[active][j][1] : num(data[active][s.key]);
-        overlay.push(<circle key={`h-${s.key}`} cx={cx} cy={y(v)} r={5} fill={s.color} stroke={tokens.surface} strokeWidth={2} />);
-      });
+    if (banded) {
+      under.push(<rect key="band" x={band * active} y={0} width={band} height={innerH} fill={tokens.hoverBand} rx={4} />);
+    } else if (showCrosshair) {
+      over.push(<line key="xh" x1={cx} x2={cx} y1={0} y2={innerH} stroke={tokens.crosshair} strokeWidth={1} />);
     }
-    if (showTooltip) {
+    visible.forEach((s) => {
+      if (s.mark === "bar") return;
+      over.push(<circle key={`h-${s.key}`} cx={cx} cy={yOf(s)(topOf(s, active))} r={5} fill={s.color} stroke={tokens.surface} strokeWidth={2} />);
+    });
+    if (showTooltip && visible.length) {
       const tipW = 190;
-      // bars: sit beside the hovered band so the active bars stay visible
-      const offset = kind === "bar" ? band / 2 + 6 : 16;
+      // banded: sit beside the hovered band so the active bars stay visible
+      const offset = banded ? band / 2 + 6 : 16;
       const flip = margin.left + cx + offset + tipW > width;
       const tx = flip ? margin.left + cx - offset : margin.left + cx + offset;
       const ty = Math.max(0, Math.min(innerH - 40, pointerY - 30)) + margin.top;
-      const rows = isStacked ? series.slice().reverse() : series.slice().sort((a, b) => num(data[active][b.key]) - num(data[active][a.key]));
+      const anyStack = visible.some(isStacked);
+      const rows =
+        kind === "combo"
+          ? visible
+          : anyStack
+          ? visible.slice().reverse()
+          : visible.slice().sort((a, b) => num(data[active][b.key]) - num(data[active][a.key]));
       tooltip = (
-        <div
-          className="tc-tooltip"
-          role="presentation"
-          style={{
-            transform: `translate(${tx}px, ${ty}px)${flip ? " translateX(-100%)" : ""}`,
-            background: tokens.tooltipBg,
-            border: `1px solid ${tokens.tooltipBorder}`,
-            color: tokens.tooltipText,
-          }}
-        >
-          <div className="tc-tooltip-title">{formatX(data[active][xKey], active)}</div>
-          {rows.map((s) => (
-            <div className="tc-tooltip-row" key={s.key}>
-              <span className={kind === "line" ? "tc-key tc-key-line" : "tc-key"} style={{ background: s.color }} />
-              <span className="tc-tooltip-label">{s.label}</span>
-              <span className="tc-tooltip-value">{formatValue(num(data[active][s.key]), s.key)}</span>
-            </div>
-          ))}
-        </div>
+        <Tooltip
+          x={tx}
+          y={ty}
+          flip={flip}
+          tokens={tokens}
+          title={formatX(data[active][xKey], active)}
+          rows={rows.map((s) => ({
+            key: s.key,
+            label: s.label,
+            color: s.color,
+            marker: s.mark === "line" ? "line" : "square",
+            value: formatValue(num(data[active][s.key]), s.key),
+          }))}
+        />
       );
     }
   }
 
   const titleId = `${id}-title`;
   const descId = `${id}-desc`;
-  const summary =
-    description ||
-    `${kind === "bar" ? "Bar" : kind === "area" ? "Area" : "Line"} chart of ${series.map((s) => s.label).join(", ")} across ${n} ${n === 1 ? "point" : "points"}.`;
+  const kindName = kind === "bar" ? "Bar" : kind === "area" ? "Area" : kind === "combo" ? "Combination" : "Line";
+  const summary = description || `${kindName} chart of ${visible.map((s) => s.label).join(", ")} across ${n} ${n === 1 ? "point" : "points"}.`;
 
   return (
     <div
@@ -347,19 +470,21 @@ export default function CartesianChart(props: CartesianProps) {
       style={{ color: tokens.text, ...style }}
       tabIndex={0}
       onKeyDown={handleKey}
-      onBlur={clear}
+      onBlur={(e) => {
+        if (e.target === e.currentTarget) clear();
+      }}
       aria-roledescription="chart"
       aria-label={title || summary}
     >
       {showLegend && series.length > 0 && (
-        <ul className="tc-legend" aria-hidden="true" style={{ color: tokens.muted }}>
-          {series.map((s) => (
-            <li key={s.key}>
-              <span className={kind === "line" ? "tc-key tc-key-line" : "tc-key"} style={{ background: s.color }} />
-              {s.label}
-            </li>
-          ))}
-        </ul>
+        <Legend
+          items={series.map((s) => ({ key: s.key, label: s.label, color: s.color }))}
+          hidden={hidden}
+          onToggle={legendToggle ? toggle : undefined}
+          onHighlight={setHighlight}
+          marker={kind === "line" ? "line" : "square"}
+          theme={theme}
+        />
       )}
       <div style={{ position: "relative", height }}>
         {width > 0 && (
@@ -370,14 +495,20 @@ export default function CartesianChart(props: CartesianProps) {
             <g transform={`translate(${margin.left},${margin.top})`}>
               {/* grid + y ticks */}
               <g aria-hidden="true">
-                {nice.ticks.map((t, i) => (
+                {axes[0].ticks.map((t, i) => (
                   <g key={`yt-${t}`} transform={`translate(0,${y(t)})`}>
                     {showGrid && t !== 0 && <line x1={0} x2={innerW} stroke={tokens.grid} strokeWidth={1} shapeRendering="crispEdges" />}
                     <text className="tc-tick" x={-10} dy="0.32em" textAnchor="end" fill={tokens.muted}>
-                      {yLabels[i]}
+                      {axes[0].labels[i]}
                     </text>
                   </g>
                 ))}
+                {axes[1] &&
+                  axes[1].ticks.map((t, i) => (
+                    <text key={`yr-${t}`} className="tc-tick" x={innerW + 10} y={axes[1].scale(t)} dy="0.32em" textAnchor="start" fill={tokens.muted}>
+                      {axes[1].labels[i]}
+                    </text>
+                  ))}
                 <line x1={0} x2={innerW} y1={baseY} y2={baseY} stroke={tokens.axis} strokeWidth={1} shapeRendering="crispEdges" />
                 {data.map((d, i) =>
                   i % labelEvery === 0 ? (
@@ -386,7 +517,7 @@ export default function CartesianChart(props: CartesianProps) {
                       className="tc-tick"
                       x={xAt(i)}
                       y={innerH + 20}
-                      textAnchor={kind !== "bar" && i === 0 && n > 1 ? "start" : kind !== "bar" && i === n - 1 && n > 1 ? "end" : "middle"}
+                      textAnchor={!banded && i === 0 && n > 1 ? "start" : !banded && i === n - 1 && n > 1 ? "end" : "middle"}
                       fill={active === i ? tokens.text : tokens.muted}
                       fontWeight={active === i ? 600 : 400}
                     >
@@ -395,11 +526,17 @@ export default function CartesianChart(props: CartesianProps) {
                   ) : null
                 )}
               </g>
-              {kind === "bar" && <g aria-hidden="true">{overlay}</g>}
-              <g className={kind === "bar" ? undefined : "tc-reveal"} aria-hidden="true">
-                {marks}
+              <g aria-hidden="true">{under}</g>
+              <g aria-hidden="true">{refMarks}</g>
+              <g className="tc-reveal" aria-hidden="true">
+                {areaMarks}
               </g>
-              {kind !== "bar" && <g aria-hidden="true">{overlay}</g>}
+              <g aria-hidden="true">{barMarks}</g>
+              <g className="tc-reveal" aria-hidden="true">
+                {lineMarks}
+              </g>
+              <g aria-hidden="true">{over}</g>
+              <g aria-hidden="true">{noteMarks}</g>
               <rect
                 x={0}
                 y={0}
@@ -416,37 +553,11 @@ export default function CartesianChart(props: CartesianProps) {
         )}
         {tooltip}
       </div>
-      <table className="tc-sr-only">
-        <caption>{title || summary}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{xKey}</th>
-            {series.map((s) => (
-              <th scope="col" key={s.key}>
-                {s.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((d, i) => (
-            <tr key={i}>
-              <th scope="row">{formatX(d[xKey], i)}</th>
-              {series.map((s) => (
-                <td key={s.key}>{formatValue(num(d[s.key]), s.key)}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <SrTable
+        caption={title || summary}
+        columns={[xKey].concat(visible.map((s) => s.label))}
+        rows={data.map((d, i) => [formatX(d[xKey], i)].concat(visible.map((s) => formatValue(num(d[s.key]), s.key))))}
+      />
     </div>
   );
-}
-
-function lastNonZero(stack: Array<[number, number]>, up: boolean): number {
-  for (let j = stack.length - 1; j >= 0; j--) {
-    const v = stack[j][1] - stack[j][0];
-    if (v !== 0 && v > 0 === up) return j;
-  }
-  return -1;
 }
