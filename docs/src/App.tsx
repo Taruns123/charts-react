@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
-import { AreaChart, BarChart, LineChart, lightPalette, darkPalette } from "t-charts";
+import { useState } from "react";
+import { AreaChart, BarChart, ComboChart, DonutChart, LineChart, ScatterChart, Sparkline } from "t-charts";
 import { Code } from "./Code";
-import { activeUsers, datasets, DatasetId, mrr, regionalSales, revenueMix, signups, usd, usdCompact } from "./data";
+import AllCharts from "./AllCharts";
+import Playground from "./Playground";
+import { accounts, activeUsers, datasets, kpis, mrr, pct, planRevenue, regionalSales, revenueMargin, revenueMix, signups, usd, usdCompact, usdK } from "./data";
 
 const GITHUB = "https://github.com/Taruns123/charts-react";
 
@@ -26,7 +28,8 @@ function Nav() {
           <span className="pill">v0.1</span>
         </a>
         <nav className="nav-links" aria-label="Primary">
-          <a href="#gallery">Gallery</a>
+          <a href="#charts">All charts</a>
+          <a href="#gallery">Examples</a>
           <a href="#playground">Playground</a>
           <a href="#install">Docs</a>
           <a className="nav-gh" href={GITHUB}>
@@ -44,11 +47,14 @@ function Nav() {
   );
 }
 
-function Stat({ label, value, delta, up = true, good = true }: { label: string; value: string; delta: string; up?: boolean; good?: boolean }) {
+function Stat({ label, value, delta, up = true, good = true, spark }: { label: string; value: string; delta: string; up?: boolean; good?: boolean; spark?: React.ReactNode }) {
   return (
     <div className="stat">
       <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
+      <div className="stat-row">
+        <div className="stat-value">{value}</div>
+        {spark && <div className="stat-spark">{spark}</div>}
+      </div>
       <div className={"stat-delta " + (good ? "good" : "bad")}>
         <span aria-hidden="true">{up ? "▲" : "▼"}</span> {delta} <span className="muted">vs last month</span>
       </div>
@@ -64,7 +70,7 @@ function Hero() {
       <div className="wrap hero-grid">
         <div className="hero-copy">
           <a className="eyebrow" href="#playground">
-            <span className="eyebrow-dot" /> New: smooth curves, gradients &amp; crosshair tooltips
+            <span className="eyebrow-dot" /> New in v0.1: donut, scatter, combo, sparkline &amp; gauge
           </a>
           <h1>
             Charts that bend
@@ -72,8 +78,9 @@ function Hero() {
             to <em>your</em> data.
           </h1>
           <p className="lede">
-            T-Charts is a small, dependency-free React library for line, area and bar charts. Pure SVG, responsive out
-            of the box, keyboard accessible, and every default tuned so your first render already looks finished.
+            T-Charts is a small, dependency-free React library: line, area, bar, combo, scatter, pie and donut charts,
+            plus sparklines and gauges. Pure SVG, responsive, keyboard accessible, and every default tuned so your first
+            render already looks finished.
           </p>
           <div className="hero-actions">
             <a className="btn btn-accent" href="#install">
@@ -96,7 +103,7 @@ function Hero() {
           </button>
           <ul className="hero-facts">
             <li>
-              <strong>~9 KB</strong> gzipped
+              <strong>~16 KB</strong> gzipped, all nine
             </li>
             <li>
               <strong>0</strong> dependencies
@@ -119,9 +126,9 @@ function Hero() {
             </div>
           </div>
           <div className="stats">
-            <Stat label="MRR" value="$61,840" delta="11.8%" />
-            <Stat label="Active users" value="3,810" delta="6.4%" />
-            <Stat label="Churn" value="2.1%" delta="0.3pt" up={false} />
+            <Stat label="MRR" value="$61,840" delta="11.8%" spark={<Sparkline data={kpis.mrr} type="area" width={64} height={26} markers={false} showTooltip={false} title="MRR trend" />} />
+            <Stat label="Active users" value="3,810" delta="6.4%" spark={<Sparkline data={kpis.active} width={64} height={26} color="#4a3aa7" showTooltip={false} title="Active users trend" />} />
+            <Stat label="Churn" value="2.1%" delta="0.3pt" up={false} spark={<Sparkline data={kpis.churn} width={64} height={26} color="#eb6834" showTooltip={false} title="Churn trend" />} />
           </div>
           <AreaChart
             data={mrr}
@@ -139,8 +146,8 @@ function Hero() {
               <LineChart data={signups.slice(4)} xKey="week" series={datasets.signups.series as any} smooth height={130} showLegend={false} showEndDot={false} yTickCount={3} />
             </div>
             <div className="mini">
-              <div className="mini-title">Sales by region</div>
-              <BarChart data={regionalSales} xKey="quarter" series={datasets.regional.series as any} height={130} showLegend={false} formatY={usdCompact} formatValue={usd} yTickCount={3} maxBarWidth={12} />
+              <div className="mini-title">Revenue by plan</div>
+              <DonutChart data={planRevenue} nameKey="plan" valueKey="revenue" height={130} legendPosition="right" legendValue="none" padAngle={2} formatValue={(v) => usdCompact(v)} centerLabel="Total" title="Revenue by plan" />
             </div>
           </div>
         </div>
@@ -150,11 +157,11 @@ function Hero() {
 }
 
 const features = [
-  ["Pure SVG", "Crisp at any zoom, styleable with CSS, printable. No canvas, no runtime dependencies."],
+  ["Nine components", "Line, area, bar, combo, scatter, pie, donut, sparkline and gauge, one consistent API."],
   ["Truthful smoothing", "Monotone cubic curves look soft but never overshoot a peak or dip below zero."],
   ["Tooltips & crosshair", "Hover, tap or arrow-key through points. Every series value for that x, at a glance."],
   ["Accessible by default", "role=img with titles, a screen-reader data table and full keyboard navigation."],
-  ["Responsive", "Charts measure their container with ResizeObserver. Set a width only if you want one."],
+  ["Legends & guides", "Click legend entries to toggle series. Add reference lines, targets and point annotations."],
   ["Colour-safe palette", "Eight hues ordered so adjacent series stay distinct for colour-blind readers."],
 ];
 
@@ -283,6 +290,80 @@ const examples: Example[] = [
 />`,
   },
   {
+    id: "combo",
+    title: "Combo with a second axis",
+    blurb: "Revenue as bars, gross margin as a line on its own percentage axis. Both axes share one grid.",
+    chart: (
+      <ComboChart
+        data={revenueMargin}
+        xKey="month"
+        series={[
+          { key: "revenue", label: "Revenue", type: "bar" },
+          { key: "margin", label: "Gross margin", type: "line", axis: "right" },
+        ]}
+        smooth
+        height={260}
+        formatY={usdK}
+        formatYRight={pct}
+        formatValue={(v, k) => (k === "margin" ? (v * 100).toFixed(0) + "%" : "$" + v + "K")}
+        title="Revenue and gross margin"
+      />
+    ),
+    code: `<ComboChart
+  data={revenueMargin}
+  xKey="month"
+  series={[
+    { key: "revenue", type: "bar" },
+    { key: "margin", type: "line", axis: "right" },
+  ]}
+  formatYRight={(v) => v * 100 + "%"}
+/>`,
+  },
+  {
+    id: "donut",
+    title: "Donut with legend",
+    blurb: "Hover or arrow through segments: the hovered one pops out and the centre shows its value and share.",
+    chart: <DonutChart data={planRevenue} nameKey="plan" valueKey="revenue" height={240} legendValue="both" formatValue={(v) => usdCompact(v)} centerLabel="Revenue" title="Revenue by plan" />,
+    code: `<DonutChart
+  data={planRevenue}
+  nameKey="plan"
+  valueKey="revenue"
+  legendValue="both"
+  centerLabel="Revenue"
+/>`,
+  },
+  {
+    id: "scatter",
+    title: "Bubble scatter",
+    blurb: "Adoption against retention for each account, sized by ARR and coloured by plan.",
+    chart: (
+      <ScatterChart
+        data={accounts}
+        xKey="adoption"
+        yKey="retention"
+        sizeKey="arr"
+        groupKey="plan"
+        labelKey="name"
+        xLabel="Feature adoption"
+        yLabel="12-mo retention"
+        sizeLabel="ARR"
+        formatX={(v) => v + "%"}
+        formatY={(v) => v + "%"}
+        formatSize={usd}
+        height={280}
+        title="Accounts by adoption, retention and ARR"
+      />
+    ),
+    code: `<ScatterChart
+  data={accounts}
+  xKey="adoption"
+  yKey="retention"
+  sizeKey="arr"
+  groupKey="plan"
+  labelKey="name"
+/>`,
+  },
+  {
     id: "dark",
     title: "Dark theme",
     blurb: "Pass theme=\"dark\" for a palette stepped for dark surfaces — not a naive inversion.",
@@ -306,8 +387,8 @@ function Gallery() {
       <div className="wrap">
         <div className="section-head">
           <span className="kicker">Gallery</span>
-          <h2>Three chart types. Dozens of shapes.</h2>
-          <p>Every example below is a live component rendering realistic data. Hover any chart, or tab to it and use the arrow keys.</p>
+          <h2>Copy-paste examples.</h2>
+          <p>Live components with realistic data and the code that renders them. Hover any chart, or tab to it and use the arrow keys.</p>
         </div>
         <div className="examples">
           {examples.map((ex) => (
@@ -326,167 +407,17 @@ function Gallery() {
   );
 }
 
-const palettes: Record<string, { label: string; colors?: string[] }> = {
-  default: { label: "Default" },
-  cobalt: { label: "Cobalt", colors: ["#0b6bcb", "#e0782f", "#7a5af5"] },
-  berry: { label: "Berry", colors: ["#d6336c", "#1c7ed6", "#f08c00"] },
-};
-
-type Kind = "area" | "line" | "bar";
-
-function Playground() {
-  const [kind, setKind] = useState<Kind>("area");
-  const [ds, setDs] = useState<DatasetId>("signups");
-  const [smooth, setSmooth] = useState(true);
-  const [gradient, setGradient] = useState(true);
-  const [stacked, setStacked] = useState(false);
-  const [paletteId, setPaletteId] = useState("default");
-  const [dark, setDark] = useState(false);
-  const [hover, setHover] = useState<number | null>(null);
-
-  const set = datasets[ds];
-  const pal = palettes[paletteId].colors;
-  const swatches = pal || (dark ? darkPalette : lightPalette).slice(0, 3);
-  const fmtY = set.currency ? usdCompact : undefined;
-  const fmtV = set.currency ? usd : undefined;
-  const common = {
-    data: set.data as any[],
-    xKey: set.xKey,
-    series: set.series as any,
-    height: 340,
-    colors: pal,
-    theme: (dark ? "dark" : "light") as "dark" | "light",
-    formatY: fmtY,
-    formatValue: fmtV,
-    onHover: (i: number | null) => setHover(i),
-    title: set.label,
-  };
-  const key = [kind, ds, smooth, gradient, stacked, paletteId, dark].join("-");
-  const chart =
-    kind === "area" ? (
-      <AreaChart key={key} {...common} smooth={smooth} gradient={gradient} stacked={stacked} />
-    ) : kind === "line" ? (
-      <LineChart key={key} {...common} smooth={smooth} />
-    ) : (
-      <BarChart key={key} {...common} stacked={stacked} />
-    );
-
-  const code = useMemo(() => {
-    const comp = kind === "area" ? "AreaChart" : kind === "line" ? "LineChart" : "BarChart";
-    const lines = [`<${comp}`, `  data={${ds}}`, `  xKey="${set.xKey}"`];
-    lines.push(`  series={[${set.series.map((s) => `"${s.key}"`).join(", ")}]}`);
-    if (smooth && kind !== "bar") lines.push("  smooth");
-    if (kind === "area" && !gradient) lines.push("  gradient={false}");
-    if (stacked && kind !== "line") lines.push("  stacked");
-    if (pal) lines.push(`  colors={[${pal.map((c) => `"${c}"`).join(", ")}]}`);
-    if (dark) lines.push('  theme="dark"');
-    lines.push("/>");
-    return `import { ${comp} } from "@taruns123/charts-react";\n\n` + lines.join("\n");
-  }, [kind, ds, smooth, gradient, stacked, pal, dark, set]);
-
-  const hovered = hover !== null ? (set.data as any[])[hover] : null;
-
-  return (
-    <section className="section section-alt" id="playground">
-      <div className="wrap">
-        <div className="section-head">
-          <span className="kicker">Playground</span>
-          <h2>Try every prop, see the code.</h2>
-          <p>Flip the switches; the component re-renders and the snippet below updates to match.</p>
-        </div>
-        <div className="pg">
-          <aside className="pg-controls" aria-label="Chart options">
-            <fieldset>
-              <legend>Chart type</legend>
-              <div className="seg seg-lg">
-                {(["area", "line", "bar"] as Kind[]).map((k) => (
-                  <button key={k} className={kind === k ? "on" : ""} onClick={() => setKind(k)} aria-pressed={kind === k}>
-                    {k[0].toUpperCase() + k.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-            <fieldset>
-              <legend>Dataset</legend>
-              <div className="ds-list">
-                {(Object.keys(datasets) as DatasetId[]).map((id) => (
-                  <button key={id} className={"ds" + (ds === id ? " on" : "")} onClick={() => setDs(id)} aria-pressed={ds === id}>
-                    <span>{datasets[id].label}</span>
-                    <span className="ds-meta">
-                      {datasets[id].series.length} series · {datasets[id].data.length} pts
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-            <fieldset>
-              <legend>Options</legend>
-              <Toggle label="Smooth curve" on={smooth} set={setSmooth} disabled={kind === "bar"} />
-              <Toggle label="Gradient fill" on={gradient} set={setGradient} disabled={kind !== "area"} />
-              <Toggle label="Stacked" on={stacked} set={setStacked} disabled={kind === "line"} />
-              <Toggle label="Dark theme" on={dark} set={setDark} />
-            </fieldset>
-            <fieldset>
-              <legend>Palette</legend>
-              <div className="pal-list">
-                {Object.entries(palettes).map(([id, p]) => {
-                  const cs = p.colors || (dark ? darkPalette : lightPalette).slice(0, 3);
-                  return (
-                    <button key={id} className={"pal" + (paletteId === id ? " on" : "")} onClick={() => setPaletteId(id)} aria-pressed={paletteId === id}>
-                      <span className="pal-sw">
-                        {cs.map((c) => (
-                          <i key={c} style={{ background: c }} />
-                        ))}
-                      </span>
-                      {p.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </fieldset>
-          </aside>
-          <div className="pg-main">
-            <div className={"pg-stage" + (dark ? " dark-surface" : "")}>
-              <div className="pg-stage-head">
-                <div>
-                  <div className="card-title">{set.label}</div>
-                  <div className="card-sub">
-                    {hovered ? (
-                      <>
-                        Hovering <strong>{String(hovered[set.xKey])}</strong> ·{" "}
-                        {set.series.map((s, i) => (
-                          <span key={s.key} className="hover-val">
-                            <i style={{ background: swatches[i] }} />
-                            {set.currency ? usd(hovered[s.key]) : hovered[s.key].toLocaleString()}
-                          </span>
-                        ))}
-                      </>
-                    ) : (
-                      "Hover the chart, or focus it and use ← →"
-                    )}
-                  </div>
-                </div>
-                <span className="pill pill-soft">onHover</span>
-              </div>
-              {chart}
-            </div>
-            <Code code={code} label="Playground.tsx" />
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Toggle({ label, on, set, disabled }: { label: string; on: boolean; set: (v: boolean) => void; disabled?: boolean }) {
-  return (
-    <label className={"toggle" + (disabled ? " disabled" : "")}>
-      <span>{label}</span>
-      <input type="checkbox" checked={on && !disabled} disabled={disabled} onChange={(e) => set(e.target.checked)} />
-      <span className="switch" aria-hidden="true" />
-    </label>
-  );
-}
+const components: [string, string, string][] = [
+  ["LineChart", "Trends over time", "smooth, showDots, zeroBaseline"],
+  ["AreaChart", "Volume and composition over time", "smooth, gradient, stacked"],
+  ["BarChart", "Comparing categories", "stacked, radius, maxBarWidth"],
+  ["ComboChart", "Bars + lines, two units", "series[].type, series[].axis, formatYRight"],
+  ["ScatterChart", "Relationships, bubbles, quadrants", "yKey, sizeKey, groupKey, quadrants"],
+  ["PieChart / DonutChart", "Parts of a whole", "nameKey, valueKey, padAngle, cornerRadius, centerValue"],
+  ["Sparkline", "Inline trends in KPI cards and tables", "type, markers, referenceValue"],
+  ["Gauge", "One KPI against a target", "value, target, thresholds, arc"],
+  ["Legend / ReferenceLine", "Shared building blocks", "onToggle, hidden · y, x, label"],
+];
 
 const props: [string, string, string, string][] = [
   ["data", "Datum[]", "—", "Array of records, one per x position."],
@@ -501,6 +432,9 @@ const props: [string, string, string, string][] = [
   ["formatY / formatValue", "(v) => string", "compact", "Axis tick and tooltip formatting."],
   ["showTooltip / showCrosshair", "boolean", "true", "Hover layer."],
   ["animate", "boolean", "true", "Entry animation; honours reduced motion."],
+  ["referenceLines", "ReferenceLineConfig[]", "—", "Targets, averages and events as dashed guide lines."],
+  ["annotations", "AnnotationConfig[]", "—", "Labelled markers on individual points."],
+  ["legendToggle", "boolean", "true", "Click legend entries to hide and show series."],
   ["onHover", "(i, datum) => void", "—", "Sync other UI with the hovered point."],
 ];
 
@@ -554,7 +488,32 @@ export function Dashboard() {
         </div>
       </div>
       <div className="wrap">
-        <h3 className="props-title">Props</h3>
+        <h3 className="props-title">Components</h3>
+        <div className="props-scroll">
+          <table className="props">
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th>Use it for</th>
+                <th>Key props</th>
+              </tr>
+            </thead>
+            <tbody>
+              {components.map(([c, use, keys]) => (
+                <tr key={c}>
+                  <td>
+                    <code>{"<" + c + ">"}</code>
+                  </td>
+                  <td>{use}</td>
+                  <td>
+                    <code className="type">{keys}</code>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <h3 className="props-title props-title-2">Shared cartesian props</h3>
         <div className="props-scroll">
           <table className="props">
             <thead>
@@ -610,6 +569,7 @@ export default function App() {
       <main>
         <Hero />
         <Features />
+        <AllCharts />
         <Gallery />
         <Playground />
         <Install />
