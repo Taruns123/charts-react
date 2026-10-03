@@ -1,9 +1,12 @@
 {
   "name": "@taruns123/charts-react",
   "version": "0.0.1",
-  "description": "A comprehensive react library for all type of charts to visualize your data.",
+  "description": "T-Charts: flexible, accessible SVG line, area and bar charts for React.",
   "scripts": {
-    "rollup": "rollup -c"
+    "rollup": "rollup -c",
+    "build": "rollup -c",
+    "docs": "npm --prefix docs run dev",
+    "docs:build": "npm --prefix docs run build"
   },
   "author": "Tarun",
   "license": "ISC",
@@ -26,5 +29,18 @@
   "publishConfig": {
     "registry": "https://npm.pkg.github.com/taruns123"
   },
-  "types": "dist/index.d.ts"
+  "types": "dist/index.d.ts",
+  "keywords": [
+    "react",
+    "charts",
+    "svg",
+    "line-chart",
+    "bar-chart",
+    "area-chart",
+    "data-visualization"
+  ],
+  "peerDependencies": {
+    "react": ">=16.8.0"
+  },
+  "sideEffects": false
 }
