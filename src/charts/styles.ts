@@ -7,7 +7,7 @@ export const css = `
 .tc-root svg{display:block;overflow:visible}
 .tc-tick{font-size:11px;font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .tc-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0 0 10px;padding:0;list-style:none;font-size:12px}
-.tc-legend li{display:flex;align-items:center;gap:6px;min-width:0}
+.tc-legend li{display:flex;align-items:center;gap:6px;flex:none;max-width:100%}
 .tc-legend-btn{display:flex;align-items:center;gap:6px;width:100%;margin:-3px -5px;padding:3px 5px;border:0;border-radius:6px;background:none;font:inherit;color:inherit;cursor:pointer;text-align:left;transition:background-color 120ms}
 .tc-legend-btn:hover{background:rgba(127,127,120,.1)}
 .tc-legend-btn:focus-visible{outline:2px solid var(--tc-focus,#2a78d6);outline-offset:1px}
@@ -16,7 +16,7 @@ export const css = `
 .tc-legend-col li{padding:3px 0}
 .tc-legend-col .tc-legend-btn{margin:-4px -6px;padding:4px 6px;width:calc(100% + 12px)}
 .tc-legend-label{white-space:nowrap}
-.tc-legend-value{margin-left:2px;font-variant-numeric:tabular-nums;font-weight:550;opacity:.75}
+.tc-legend-value{margin-left:2px;white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:550;opacity:.75}
 .tc-legend-col li{min-width:0}
 .tc-legend-col .tc-legend-label{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .tc-legend-col .tc-legend-value{margin-left:auto;padding-left:12px;flex:none}

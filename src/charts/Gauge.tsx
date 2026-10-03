@@ -55,7 +55,10 @@ const Gauge = (props: GaugeProps) => {
 
   // fit the arc: how far below the centre it reaches depends on the sweep
   const below = full || sweep >= 180 ? Math.max(0, -Math.cos(a1)) : 0;
-  const footer = showMinMax ? 18 : 4;
+  // the status / target line sits under an open arc (inside a full ring)
+  const hasStatusLine = !!(thresholds && thresholds.length) || target !== undefined;
+  const statusBelow = hasStatusLine && !full;
+  const footer = (showMinMax ? 18 : 4) + (statusBelow ? 20 : 0);
   const R = Math.max(10, Math.min(width / 2 - 6, (height - footer - 8) / (1 + (full ? 1 : below))));
   const thick = props.thickness || Math.max(6, R * 0.13);
   const rMid = R - thick / 2;
@@ -150,7 +153,7 @@ const Gauge = (props: GaugeProps) => {
             </text>
           )}
           {(status || target !== undefined) && (
-            <text x={cx} y={valueY + (label ? 2 : 1) * (small + 8) + 2} textAnchor="middle" fontSize={small} fontWeight={600} fill={status ? color : tokens.muted}>
+            <text x={cx} y={statusBelow ? Math.min(height - 4, cy + R * below + thick / 2 + (showMinMax ? 34 : 18)) : valueY + (label ? 2 : 1) * (small + 8) + 2} textAnchor="middle" fontSize={small} fontWeight={600} fill={status ? color : tokens.muted}>
               {status ? status : ""}
               {status && target !== undefined ? " · " : ""}
               {target !== undefined ? <tspan fill={tokens.muted} fontWeight={400}>{`Target ${formatValue(target)}`}</tspan> : null}

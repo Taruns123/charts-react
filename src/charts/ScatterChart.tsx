@@ -186,25 +186,28 @@ const ScatterChart = (props: ScatterChartProps) => {
       guides.push(
         <g key={"ry" + k}>
           <line x1={0} x2={innerW} y1={yy} y2={yy} stroke={color} strokeDasharray={dash} strokeWidth={r.strokeWidth || 1} shapeRendering="crispEdges" />
-          {r.label && (
-            <text className="tc-ref-label" x={r.labelPosition === "start" ? 4 : innerW - 4} y={yy - 6} textAnchor={r.labelPosition === "start" ? "start" : "end"} fill={color} stroke={tokens.surface}>
-              {r.label}
-            </text>
-          )}
         </g>
       );
+      const atStart = r.labelPosition === "start";
+      if (r.label)
+        quadLabels.push(
+          <text key={"ryl" + k} className="tc-ref-label" x={atStart ? 4 : innerW - 4} y={yy - 6} textAnchor={atStart ? "start" : "end"} fill={color} stroke={tokens.surface}>
+            {r.label}
+          </text>
+        );
     } else if (typeof r.x === "number") {
       const xx = x(r.x);
       guides.push(
         <g key={"rx" + k}>
           <line x1={xx} x2={xx} y1={0} y2={innerH} stroke={color} strokeDasharray={dash} strokeWidth={r.strokeWidth || 1} shapeRendering="crispEdges" />
-          {r.label && (
-            <text className="tc-ref-label" x={xx + 6} y={10} fill={color} stroke={tokens.surface}>
-              {r.label}
-            </text>
-          )}
         </g>
       );
+      if (r.label)
+        quadLabels.push(
+          <text key={"rxl" + k} className="tc-ref-label" x={xx + 6} y={10} fill={color} stroke={tokens.surface}>
+            {r.label}
+          </text>
+        );
     }
   });
 

@@ -343,6 +343,8 @@ export default function CartesianChart(props: CartesianProps) {
 
   // ----- reference lines & annotations -----
   const refMarks: React.ReactNode[] = [];
+  // labels go in a top layer so bars and areas never cover them
+  const refLabels: React.ReactNode[] = [];
   refLines.forEach((r, k) => {
     const color = r.color || tokens.reference;
     const dash = r.dashed === false ? undefined : "4 4";
@@ -355,13 +357,14 @@ export default function CartesianChart(props: CartesianProps) {
       refMarks.push(
         <g key={`ry-${k}`} className="tc-ref">
           <line x1={0} x2={innerW} y1={yy} y2={yy} stroke={color} strokeWidth={sw} strokeDasharray={dash} shapeRendering="crispEdges" />
-          {r.label && (
-            <text className="tc-ref-label" x={atStart ? 4 : innerW - 4} y={yy - 6} textAnchor={atStart ? "start" : "end"} fill={color} stroke={tokens.surface}>
-              {r.label}
-            </text>
-          )}
         </g>
       );
+      if (r.label)
+        refLabels.push(
+          <text key={`ryl-${k}`} className="tc-ref-label" x={atStart ? 4 : innerW - 4} y={yy - 6} textAnchor={atStart ? "start" : "end"} fill={color} stroke={tokens.surface}>
+            {r.label}
+          </text>
+        );
     } else if (r.x !== undefined) {
       const idx = indexOfX(r.x);
       if (idx < 0) return;
@@ -370,13 +373,14 @@ export default function CartesianChart(props: CartesianProps) {
       refMarks.push(
         <g key={`rx-${k}`} className="tc-ref">
           <line x1={xx} x2={xx} y1={0} y2={innerH} stroke={color} strokeWidth={sw} strokeDasharray={dash} shapeRendering="crispEdges" />
-          {r.label && (
-            <text className="tc-ref-label" x={right ? xx - 6 : xx + 6} y={10} textAnchor={right ? "end" : "start"} fill={color} stroke={tokens.surface}>
-              {r.label}
-            </text>
-          )}
         </g>
       );
+      if (r.label)
+        refLabels.push(
+          <text key={`rxl-${k}`} className="tc-ref-label" x={right ? xx - 6 : xx + 6} y={10} textAnchor={right ? "end" : "start"} fill={color} stroke={tokens.surface}>
+            {r.label}
+          </text>
+        );
     }
   });
 
@@ -536,6 +540,7 @@ export default function CartesianChart(props: CartesianProps) {
                 {lineMarks}
               </g>
               <g aria-hidden="true">{over}</g>
+              <g aria-hidden="true">{refLabels}</g>
               <g aria-hidden="true">{noteMarks}</g>
               <rect
                 x={0}
