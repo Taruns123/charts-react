@@ -1,9 +1,15 @@
 {
   "name": "@taruns123/charts-react",
-  "version": "0.0.1",
-  "description": "A comprehensive react library for all type of charts to visualize your data.",
+  "version": "0.1.0",
+  "description": "T-Charts: small, accessible SVG charts for React — line, area, bar, combo, scatter, pie/donut, sparkline and gauge.",
   "scripts": {
-    "rollup": "rollup -c"
+    "rollup": "rollup -c",
+    "build": "rollup -c",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "docs": "npm --prefix docs run dev",
+    "docs:build": "npm --prefix docs run build"
   },
   "author": "Tarun",
   "license": "ISC",
@@ -11,12 +17,18 @@
     "@rollup/plugin-commonjs": "^21.0.1",
     "@rollup/plugin-node-resolve": "^13.0.6",
     "@rollup/plugin-typescript": "^8.3.0",
-    "@types/react": "^17.0.34",
-    "react": "^17.0.2",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "jsdom": "^25.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "rollup": "^2.60.0",
     "rollup-plugin-dts": "^4.0.1",
     "tslib": "^2.7.0",
-    "typescript": "^4.4.4"
+    "typescript": "^4.4.4",
+    "vitest": "^2.1.9"
   },
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
@@ -26,5 +38,24 @@
   "publishConfig": {
     "registry": "https://npm.pkg.github.com/taruns123"
   },
-  "types": "dist/index.d.ts"
+  "types": "dist/index.d.ts",
+  "keywords": [
+    "react",
+    "charts",
+    "svg",
+    "line-chart",
+    "bar-chart",
+    "area-chart",
+    "pie-chart",
+    "donut-chart",
+    "scatter-chart",
+    "sparkline",
+    "gauge",
+    "data-visualization",
+    "accessible"
+  ],
+  "peerDependencies": {
+    "react": ">=16.8.0"
+  },
+  "sideEffects": false
 }

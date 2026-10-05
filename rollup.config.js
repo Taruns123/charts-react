@@ -5,9 +5,13 @@ import dts from "rollup-plugin-dts";
 
 const packageJson = require("./package.json");
 
+// React is a peer dependency: never bundle it into the library output.
+const external = (id) => id === "react" || id.startsWith("react/") || id === "react-dom";
+
 export default [
     {
         input: "src/index.ts",
+        external,
         output: [
             {
                 file: packageJson.main,
@@ -23,7 +27,7 @@ export default [
         plugins: [
             resolve(),
             commonjs(),
-            typescript({ tsconfig: "./tsconfig.json" }),
+            typescript({ tsconfig: "./tsconfig.json", exclude: ["docs/**"] }),
         ],
     },
     {

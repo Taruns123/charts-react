@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
     // Default
-    "target": "es5",
+    "target": "es2017",
+    "lib": ["dom", "es2017"],
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
@@ -16,5 +17,6 @@
     "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
     "emitDeclarationOnly": true,
-  }
+  },
+  "include": ["src"]
 }
